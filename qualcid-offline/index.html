@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f4e79">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="QualCID">
+<link rel="manifest" href="manifest.webmanifest">
+<title>QualCID Off-line</title>
+<style>
+  :root {
+    --bg: #f4f6f8; --card: #fff; --fg: #1b1f23; --muted: #5f6b76;
+    --line: #dde3e8; --accent: #1f4e79; --accent-soft: #e6eef6;
+    --ok: #1e7a3c; --warn: #9a6200;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121619; --card: #1b2126; --fg: #e8edf1; --muted: #9aa7b2;
+      --line: #2c353d; --accent: #7fb3e6; --accent-soft: #1f2d3a;
+      --ok: #5cc27f; --warn: #e0a64a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; background: var(--accent); color: #fff;
+    padding: calc(10px + env(safe-area-inset-top)) 16px 10px; }
+  @media (prefers-color-scheme: dark) { header { background: #16324d; } }
+  header h1 { margin: 0 0 8px; font-size: 18px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  header h1 small { font-weight: 400; opacity: .8; font-size: 12px; }
+  .search { display: flex; gap: 6px; }
+  .search input { flex: 1; min-width: 0; font-size: 17px; padding: 10px 12px; border-radius: 10px; border: 0; }
+  .tabs { display: flex; gap: 6px; margin-top: 8px; }
+  .tabs button { flex: 1; border: 1px solid rgba(255,255,255,.5); background: transparent; color: #fff;
+    padding: 6px; border-radius: 8px; font-size: 14px; }
+  .tabs button.on { background: #fff; color: #1f4e79; }
+  main { max-width: 820px; margin: 0 auto; padding: 12px 16px 40px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+  .list { list-style: none; margin: 0; padding: 0; }
+  .list li { border-bottom: 1px solid var(--line); }
+  .list li:last-child { border-bottom: 0; }
+  .list a { display: block; padding: 11px 2px; color: inherit; text-decoration: none; }
+  .list a:active { background: var(--accent-soft); }
+  .code { font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; margin-right: 6px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .tag { display: inline-block; font-size: 12px; padding: 1px 7px; border-radius: 99px; margin-left: 4px;
+    border: 1px solid currentColor; vertical-align: 1px; }
+  .tag.p { color: var(--ok); } .tag.s { color: var(--warn); }
+  h2 { font-size: 20px; margin: 0 0 6px; }
+  h3 { font-size: 17px; margin: 14px 0 6px; }
+  dl { margin: 8px 0 0; display: grid; grid-template-columns: max-content 1fr; gap: 4px 10px; font-size: 15px; }
+  dt { color: var(--muted); } dd { margin: 0; }
+  .filter { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 4px; }
+  .filter button, .btn { border: 1px solid var(--line); background: var(--card); color: var(--fg);
+    border-radius: 8px; padding: 6px 10px; font-size: 14px; }
+  .filter button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .back { display: inline-block; margin-bottom: 10px; color: var(--accent); text-decoration: none; }
+  .drop { border: 2px dashed var(--line); border-radius: 12px; padding: 20px; text-align: center; }
+  .progress { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 10px; }
+  .progress div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  ol.steps { padding-left: 20px; } ol.steps li { margin-bottom: 6px; }
+  code { background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; font-size: 14px; }
+  .err { color: #c0392b; }
+  .more { width: 100%; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>QualCID Off-line <small id="comp"></small></h1>
+  <div class="search"><input id="q" type="search" placeholder="CID, doença ou procedimento…" autocomplete="off" autocorrect="off" spellcheck="false"></div>
+  <div class="tabs">
+    <button data-mode="cid" class="on">Por CID</button>
+    <button data-mode="proc">Por procedimento</button>
+  </div>
+</header>
+<main id="app"></main>
+
+<!-- Quando gerado pelo build.py, os dados da SIGTAP são embutidos aqui. -->
+<script id="sigtap-data" type="application/json"></script>
+
+<script>
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const app = $("#app");
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const norm = s => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+const fmtProc = c => c.length === 10 ? `${c.slice(0,2)}.${c.slice(2,4)}.${c.slice(4,6)}.${c.slice(6,9)}-${c[9]}` : c;
+const fmtCid = c => c.length > 3 ? c.slice(0,3) + "." + c.slice(3) : c;
+const fmtComp = c => c && c.length === 6 ? `${c.slice(4)}/${c.slice(0,4)}` : (c || "");
+const SEXO = { I: "Ambos", M: "Masculino", F: "Feminino", N: "Não se aplica" };
+const CLASSIF = { "": "Não tem dupla classificação", "+": "Etiologia (código cruz †)", "*": "Manifestação (código asterisco)" };
+
+/* ---------- Dados ----------
+   D = { comp, cids: [[code, name, sexo, cls, refer, excl]], procs: [[code, name, sexo, idMin, idMax]],
+         rel: { [cidIndex]: [procIndex*2 + (principal?1:0), ...] } }
+*/
+let D = null, cidIdx, procIdx, procRel, cidSearch, procSearch;
+
+function prepare(data) {
+  D = data;
+  cidIdx = new Map(D.cids.map((c, i) => [c[0], i]));
+  procIdx = new Map(D.procs.map((p, i) => [p[0], i]));
+  procRel = D.procs.map(() => []);
+  for (const [ci, arr] of Object.entries(D.rel))
+    for (const v of arr) procRel[v >> 1].push(Number(ci) * 2 + (v & 1));
+  cidSearch = D.cids.map(c => norm(c[0] + " " + fmtCid(c[0]) + " " + c[1]));
+  procSearch = D.procs.map(p => norm(p[0] + " " + fmtProc(p[0]) + " " + p[1]));
+  $("#comp").textContent = D.comp ? "SIGTAP " + fmtComp(D.comp) : "";
+}
+
+/* ---------- Leitura de ZIP (sem bibliotecas, usa DecompressionStream) ---------- */
+async function unzip(buf) {
+  const dv = new DataView(buf), u8 = new Uint8Array(buf), out = {};
+  let eocd = -1;
+  for (let i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 66000); i--)
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error("Arquivo ZIP inválido.");
+  let n = dv.getUint16(eocd + 10, true), p = dv.getUint32(eocd + 16, true);
+  const td = new TextDecoder("utf-8");
+  for (let k = 0; k < n; k++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) throw new Error("ZIP corrompido.");
+    const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true);
+    const nl = dv.getUint16(p + 28, true), el = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true);
+    const lho = dv.getUint32(p + 42, true);
+    const name = td.decode(u8.subarray(p + 46, p + 46 + nl));
+    p += 46 + nl + el + cl;
+    const base = name.split("/").pop().toLowerCase();
+    if (!/^(tb_cid|tb_procedimento|rl_procedimento_cid)(_layout)?\.txt$/.test(base)) continue;
+    const start = lho + 30 + dv.getUint16(lho + 26, true) + dv.getUint16(lho + 28, true);
+    const raw = u8.subarray(start, start + csize);
+    let data;
+    if (method === 0) data = raw;
+    else if (method === 8) data = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+    else throw new Error("Compressão ZIP não suportada: " + method);
+    out[base] = data;
+  }
+  return out;
+}
+
+/* ---------- Parser dos arquivos SIGTAP (largura fixa, ISO-8859-1) ---------- */
+const DEFAULT_LAYOUT = {
+  tb_cid: "CO_CID,4,1,4\nNO_CID,100,5,104\nTP_AGRAVO,1,105,105\nTP_SEXO,1,106,106",
+  tb_procedimento: "CO_PROCEDIMENTO,10,1,10\nNO_PROCEDIMENTO,250,11,260\nTP_COMPLEXIDADE,1,261,261\nTP_SEXO,1,262,262\nQT_MAXIMA_EXECUCAO,4,263,266\nQT_DIAS_PERMANENCIA,4,267,270\nQT_PONTOS,4,271,274\nVL_IDADE_MINIMA,4,275,278\nVL_IDADE_MAXIMA,4,279,282",
+  rl_procedimento_cid: "CO_PROCEDIMENTO,10,1,10\nCO_CID,4,11,14\nST_PRINCIPAL,1,15,15\nDT_COMPETENCIA,6,16,21",
+};
+const latin1 = new TextDecoder("windows-1252");
+
+function parseLayout(txt) {
+  const cols = {};
+  for (const line of txt.split(/\r?\n/)) {
+    const f = line.split(",").map(s => s.trim());
+    if (f.length >= 4 && /^\d+$/.test(f[2])) cols[f[0].toUpperCase()] = [Number(f[2]) - 1, Number(f[3])];
+  }
+  return cols;
+}
+
+function parseTable(files, name, wanted) {
+  const bytes = files[name + ".txt"];
+  if (!bytes) throw new Error(`Arquivo ${name}.txt não encontrado.`);
+  const lay = parseLayout(files[name + "_layout.txt"] ? latin1.decode(files[name + "_layout.txt"]) : DEFAULT_LAYOUT[name]);
+  const pos = wanted.map(w => lay[w]);
+  const rows = [];
+  for (const line of latin1.decode(bytes).split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    rows.push(pos.map(p => p ? line.slice(p[0], p[1]).trim() : ""));
+  }
+  return rows;
+}
+
+function buildFromSigtap(files, cid10csv) {
+  const tbCid = parseTable(files, "tb_cid", ["CO_CID", "NO_CID", "TP_SEXO"]);
+  const tbProc = parseTable(files, "tb_procedimento", ["CO_PROCEDIMENTO", "NO_PROCEDIMENTO", "TP_SEXO", "VL_IDADE_MINIMA", "VL_IDADE_MAXIMA", "DT_COMPETENCIA"]);
+  const rel = parseTable(files, "rl_procedimento_cid", ["CO_PROCEDIMENTO", "CO_CID", "ST_PRINCIPAL", "DT_COMPETENCIA"]);
+  const extra = cid10csv ? parseCid10Csv(cid10csv) : {};
+  const cids = tbCid.map(([c, n, s]) => { const e = extra[c] || []; return [c, n, s, e[0] ?? null, e[1] ?? "", e[2] ?? ""]; })
+    .sort((a, b) => a[0] < b[0] ? -1 : 1);
+  const procs = tbProc.map(([c, n, s, mi, ma]) => [c, n, s, Number(mi || 0), Number(ma || 9999)]).sort((a, b) => a[0] < b[0] ? -1 : 1);
+  const ci = new Map(cids.map((c, i) => [c[0], i])), pi = new Map(procs.map((p, i) => [p[0], i]));
+  const R = {};
+  let comp = tbProc.reduce((m, r) => r[5] > m ? r[5] : m, "");
+  for (const [p, c, st, dt] of rel) {
+    const a = ci.get(c), b = pi.get(p);
+    if (a === undefined || b === undefined) continue;
+    (R[a] ||= []).push(b * 2 + (st === "P" ? 1 : 0));
+    if (dt > comp) comp = dt;
+  }
+  for (const k in R) R[k].sort((x, y) => x - y);
+  return { comp, cids, procs, rel: R };
+}
+
+// CSV opcional do DATASUS: CID-10-SUBCATEGORIAS.CSV (SUBCAT;CLASSIF;RESTRSEXO;CAUSAOBITO;DESCRICAO;DESCRABREV;REFER;EXCLUIDOS)
+function parseCid10Csv(bytes) {
+  const lines = latin1.decode(bytes).split(/\r?\n/);
+  const head = lines.shift().split(";").map(s => s.trim().toUpperCase());
+  const ix = k => head.indexOf(k), out = {};
+  for (const l of lines) {
+    if (!l.trim()) continue;
+    const f = l.split(";");
+    out[f[ix("SUBCAT")].trim()] = [(f[ix("CLASSIF")] || "").trim(), (f[ix("REFER")] || "").trim(), (f[ix("EXCLUIDOS")] || "").trim()];
+  }
+  return out;
+}
+
+/* ---------- Armazenamento local (IndexedDB) ---------- */
+const DB = {
+  open() { return new Promise((res, rej) => { const r = indexedDB.open("qualcid-offline", 1); r.onupgradeneeded = () => r.result.createObjectStore("kv"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); },
+  async get(k) { const db = await this.open(); return new Promise((res, rej) => { const r = db.transaction("kv").objectStore("kv").get(k); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); },
+  async set(k, v) { const db = await this.open(); return new Promise((res, rej) => { const t = db.transaction("kv", "readwrite"); t.objectStore("kv").put(v, k); t.oncomplete = res; t.onerror = () => rej(t.error); }); },
+  async del(k) { const db = await this.open(); return new Promise(res => { const t = db.transaction("kv", "readwrite"); t.objectStore("kv").delete(k); t.oncomplete = res; }); },
+};
+
+/* ---------- Telas ---------- */
+let mode = "cid";
+const PAGE = 100;
+
+function viewImport(msg = "") {
+  app.innerHTML = `
+  <div class="card">
+    <h2>Carregar a tabela SIGTAP</h2>
+    <p>Os dados (CIDs × procedimentos compatíveis) vêm da tabela oficial SIGTAP do DATASUS — a mesma fonte do qualcid.com.br.
+       Carregue o arquivo uma vez; depois tudo funciona sem internet.</p>
+    <ol class="steps">
+      <li>Baixe o ZIP <code>TabelaUnificada_AAAAMM_vXXXXXXXX.zip</code> mais recente em
+        <a href="http://sigtap.datasus.gov.br/tabela-unificada/app/download.jsp" target="_blank" rel="noopener">sigtap.datasus.gov.br → Download</a>.</li>
+      <li>Selecione o ZIP abaixo (ou os arquivos <code>tb_cid.txt</code>, <code>tb_procedimento.txt</code>, <code>rl_procedimento_cid.txt</code> já extraídos).</li>
+      <li><i>Opcional:</i> selecione junto o <code>CID-10-SUBCATEGORIAS.CSV</code> do DATASUS para mostrar classificação, excluídos e referências.</li>
+    </ol>
+    <div class="drop" id="drop">
+      <input type="file" id="file" multiple accept=".zip,.txt,.csv">
+      <div class="progress"><div id="bar"></div></div>
+      <p class="muted" id="status">${esc(msg)}</p>
+    </div>
+  </div>`;
+  const input = $("#file"), drop = $("#drop");
+  input.onchange = () => importFiles([...input.files]);
+  drop.ondragover = e => { e.preventDefault(); };
+  drop.ondrop = e => { e.preventDefault(); importFiles([...e.dataTransfer.files]); };
+}
+
+async function importFiles(list) {
+  const st = $("#status"), bar = $("#bar");
+  const step = (t, p) => { st.textContent = t; bar.style.width = p + "%"; };
+  try {
+    let files = {}, csv = null;
+    for (const f of list) {
+      const lower = f.name.toLowerCase(), buf = await f.arrayBuffer();
+      if (lower.endsWith(".zip")) { step("Descompactando " + f.name + "…", 15); Object.assign(files, await unzip(buf)); }
+      else if (lower.endsWith(".csv")) csv = new Uint8Array(buf);
+      else files[lower.split("/").pop()] = new Uint8Array(buf);
+    }
+    step("Lendo tabelas…", 50);
+    await new Promise(r => setTimeout(r, 30));
+    const data = buildFromSigtap(files, csv);
+    step("Salvando no aparelho…", 85);
+    await DB.set("data", data);
+    step(`Pronto: ${data.cids.length} CIDs, ${data.procs.length} procedimentos.`, 100);
+    prepare(data);
+    location.hash = "";
+    route();
+  } catch (e) {
+    console.error(e);
+    st.innerHTML = `<span class="err">${esc(e.message || e)}</span>`;
+  }
+}
+
+function search(q) {
+  const t = norm(q.trim()), compact = t.replace(/[.\-\s]/g, "");
+  const idx = mode === "cid" ? cidSearch : procSearch, rows = mode === "cid" ? D.cids : D.procs;
+  if (!t) return rows.map((_, i) => i);
+  const words = t.split(/\s+/), starts = [], rest = [];
+  for (let i = 0; i < idx.length; i++) {
+    if (!words.every(w => idx[i].includes(w)) && !(compact && rows[i][0].toLowerCase().startsWith(compact))) continue;
+    (rows[i][0].toLowerCase().startsWith(compact) ? starts : rest).push(i);
+  }
+  return starts.concat(rest);
+}
+
+function viewList(limit = PAGE) {
+  const q = $("#q").value, hits = search(q);
+  const rows = mode === "cid" ? D.cids : D.procs;
+  const item = mode === "cid"
+    ? i => { const c = rows[i], n = (D.rel[i] || []).length;
+        return `<li><a href="#cid/${c[0]}"><span class="code">${fmtCid(c[0])}</span>${esc(c[1])}<br><span class="muted">${n ? n + " procedimento(s) compatível(is)" : "nenhum procedimento vinculado"}</span></a></li>`; }
+    : i => { const p = rows[i];
+        return `<li><a href="#proc/${p[0]}"><span class="code">${fmtProc(p[0])}</span>${esc(p[1])}<br><span class="muted">${procRel[i].length} CID(s) compatível(is)</span></a></li>`; };
+  app.innerHTML = `
+    <div class="card">
+      <div class="muted">${hits.length.toLocaleString("pt-BR")} resultado(s)</div>
+      <ul class="list">${hits.slice(0, limit).map(item).join("")}</ul>
+      ${hits.length > limit ? `<button class="btn more" id="more">Mostrar mais</button>` : ""}
+    </div>
+    <div class="card muted">
+      SIGTAP ${esc(fmtComp(D.comp))} · ${D.cids.length.toLocaleString("pt-BR")} CIDs · ${D.procs.length.toLocaleString("pt-BR")} procedimentos.
+      <button class="btn" id="reload" style="margin-left:6px">Atualizar tabela</button>
+    </div>`;
+  if ($("#more")) $("#more").onclick = () => viewList(limit + PAGE * 5);
+  $("#reload").onclick = () => viewImport("Selecione um ZIP mais novo da SIGTAP para substituir os dados atuais.");
+}
+
+function relFilter(items, render) {
+  const nP = items.filter(v => v & 1).length;
+  return `
+    <div class="filter" id="flt">
+      <button data-f="all" class="on">Todos (${items.length})</button>
+      ${nP && nP < items.length ? `<button data-f="p">Principal (${nP})</button><button data-f="s">Secundário (${items.length - nP})</button>` : ""}
+    </div>
+    <ul class="list" id="rel">${items.map(v => render(v)).join("")}</ul>`;
+}
+function bindFilter() {
+  const flt = $("#flt"); if (!flt) return;
+  flt.onclick = e => {
+    const b = e.target.closest("button"); if (!b) return;
+    flt.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
+    document.querySelectorAll("#rel li").forEach(li => li.hidden = b.dataset.f !== "all" && li.dataset.k !== b.dataset.f);
+  };
+}
+const tag = v => (v & 1) ? `<span class="tag p">principal</span>` : `<span class="tag s">secundário</span>`;
+
+function viewCid(code) {
+  const i = cidIdx.get(code);
+  if (i === undefined) return app.innerHTML = `<div class="card">CID ${esc(code)} não encontrado. <a href="#">Voltar</a></div>`;
+  const c = D.cids[i], rel = D.rel[i] || [];
+  const extra = c[3] !== null
+    ? `<dt>Classificação</dt><dd>${esc(CLASSIF[c[3]] ?? c[3])}</dd><dt>Excluídos</dt><dd>${esc(c[5] || "Nenhum")}</dd><dt>Referências</dt><dd>${esc(c[4] || "Nenhuma")}</dd>` : "";
+  app.innerHTML = `
+    <a class="back" href="#" onclick="history.length > 1 ? history.back() : (location.hash = ''); return false">‹ Voltar</a>
+    <div class="card">
+      <h2><span class="code">${fmtCid(c[0])}</span>${esc(c[1])}</h2>
+      <dl><dt>Sexo</dt><dd>${esc(SEXO[c[2]] || c[2] || "—")}</dd>${extra}</dl>
+    </div>
+    <div class="card">
+      <h3>Procedimentos</h3>
+      ${rel.length ? relFilter(rel, v => { const p = D.procs[v >> 1];
+          return `<li data-k="${v & 1 ? "p" : "s"}"><a href="#proc/${p[0]}"><span class="code">${fmtProc(p[0])}</span>${esc(p[1])} ${tag(v)}</a></li>`; })
+        : `<p class="muted">Nenhum procedimento da SIGTAP vinculado a este CID.</p>`}
+    </div>`;
+  bindFilter(); scrollTo(0, 0);
+}
+
+function viewProc(code) {
+  const i = procIdx.get(code);
+  if (i === undefined) return app.innerHTML = `<div class="card">Procedimento ${esc(code)} não encontrado. <a href="#">Voltar</a></div>`;
+  const p = D.procs[i], rel = procRel[i];
+  const idade = v => v >= 9999 ? "—" : (v >= 12 && v % 12 === 0 ? v / 12 + " ano(s)" : v + " mês(es)");
+  app.innerHTML = `
+    <a class="back" href="#" onclick="history.length > 1 ? history.back() : (location.hash = ''); return false">‹ Voltar</a>
+    <div class="card">
+      <h2><span class="code">${fmtProc(p[0])}</span>${esc(p[1])}</h2>
+      <dl><dt>Sexo</dt><dd>${esc(SEXO[p[2]] || p[2] || "—")}</dd><dt>Idade</dt><dd>${idade(p[3])} a ${idade(p[4])}</dd></dl>
+    </div>
+    <div class="card">
+      <h3>CIDs compatíveis</h3>
+      ${rel.length ? relFilter(rel, v => { const c = D.cids[v >> 1];
+          return `<li data-k="${v & 1 ? "p" : "s"}"><a href="#cid/${c[0]}"><span class="code">${fmtCid(c[0])}</span>${esc(c[1])} ${tag(v)}</a></li>`; })
+        : `<p class="muted">Este procedimento não exige CID (nenhum vínculo na SIGTAP).</p>`}
+    </div>`;
+  bindFilter(); scrollTo(0, 0);
+}
+
+function route() {
+  if (!D) return viewImport();
+  const [kind, code] = decodeURIComponent(location.hash.slice(1)).split("/");
+  if (kind === "cid" && code) return viewCid(code.replace(".", "").toUpperCase());
+  if (kind === "proc" && code) return viewProc(code.replace(/\D/g, ""));
+  viewList();
+}
+
+let tmr;
+$("#q").addEventListener("input", () => { clearTimeout(tmr); tmr = setTimeout(() => { if (!D) return; if (location.hash) location.hash = ""; else viewList(); }, 150); });
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
+  mode = b.dataset.mode;
+  document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
+  $("#q").placeholder = mode === "cid" ? "CID ou nome da doença…" : "Código ou nome do procedimento…";
+  if (!D) return; if (location.hash) location.hash = ""; else viewList();
+});
+addEventListener("hashchange", route);
+
+(async () => {
+  const embedded = $("#sigtap-data").textContent.trim();
+  try {
+    // Usa a versão mais nova entre a embutida (build.py) e a importada no aparelho.
+    const emb = embedded ? JSON.parse(embedded) : null;
+    let saved = null; try { saved = await DB.get("data"); } catch (_) {}
+    const best = saved && (!emb || saved.comp >= emb.comp) ? saved : emb;
+    if (best) prepare(best);
+  } catch (e) { console.error(e); }
+  route();
+  if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => {});
+})();
+</script>
+</body>
+</html>
